@@ -1,4 +1,4 @@
-<img width="1742" height="1019" alt="image" src="https://github.com/user-attachments/assets/f02dd6d2-45da-4d7f-9e15-41adfd0f9b51" />#  Eyes-Catching
+#  Eyes-Catching
 
 ### 使用簡單演算法進行眼睛偵測（不使用任何學習模型）
 
