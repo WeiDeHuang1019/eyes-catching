@@ -1,111 +1,182 @@
-#  Eyes-Catching
+# Eyes-Catching
 
 ### 使用簡單演算法進行眼睛偵測（不使用任何學習模型）
 
 ---
 
-##  專案概述
+## 專案概述
 
 本專案展示一種**輕量且可解釋性高**的眼睛偵測方法，完全基於傳統影像處理技術，**不依賴任何機器學習或深度學習模型**。
 
-目標是在影像中透過一套結構化流程，以兩段式步驟：先找出眼睛ROI->在於ROI偵測眼珠位置。
-(本專案以Google Colab 實作)
+整體流程採用兩階段方法：
+
+> **先定位眼睛 ROI → 再於 ROI 中偵測眼珠位置**
+
+（本專案於 Google Colab 環境實作）
 
 ---
 
-##  設計理念
+## 設計理念
 
 本方法主要運用以下技術：
 
 * 灰階轉換（Grayscale）
 * 二值化（Thresholding）
-* 輪廓偵測（Contour Detection）
-* 霍夫圓偵測(Hough Circles)
-* 幾何條件篩選（Geometric Filtering）
+* 幾何結構分析（Row-wise Geometry Analysis）
+* 群心計算（Centroid）
 
 其特點為：
 
 * 執行速度快
 * 可解釋性高
+* 不需訓練資料
 * 適合低資源環境
 
 ---
 
-##  處理流程
+## 處理流程
 
-### (1) 擷取人體輪廓
+---
 
-首先從影像中分離出人體的主要輪廓。
+### (1) 擷取人體輪廓（Row-based）
+
+本方法**不使用 contour 或 bounding box**，而是透過逐列掃描方式分析人體輪廓。
 
 **步驟：**
 
 * 將影像轉為灰階
-* 使用閾值處理（threshold）區分前景與背景
-* 偵測影像中的輪廓
-* 篩選出最大輪廓（通常視為人體）
+* 使用固定 threshold（如 215）進行二值化（前景=人體）
+* 對每一列（row）：
+  * 找出該列的最左與最右前景點
+  * 計算寬度與中心位置
+
+**計算結果：**
+
+* 臉部水平中心（x_face）：所有列中心的中位數
+* 頭頂（y_top）：第一個出現前景的列
+* 脖子（y_neck）：在指定範圍內「最窄寬度」的位置
+
+
 
 **目的：**
-縮小搜尋範圍，排除背景雜訊。
+利用人體幾何特徵（頭寬→脖子變窄）來建立穩定參考點。
 
+<img width="1135" height="719" alt="image" src="https://github.com/user-attachments/assets/56064a76-84ad-4846-935f-7557cf4ad090" />
 ---
 
-### (2) 根據輪廓定位眼睛區域並擷取 ROI
+### (2) 根據幾何比例定位眼睛 ROI
 
-利用人體輪廓，估計眼睛的大致位置。
+透過頭頂與脖子之間的距離，推估臉部比例，進而定位眼睛區域。
 
 **步驟：**
 
-* 計算人體輪廓的外接矩形（bounding box）
-* 取該區域的上半部或特定比例區域
-* 擷取該區域作為 ROI（Region of Interest）
+* 計算頭部高度：
+  ```
+  head_h = y_neck - y_top
+  ```
 
-**假設：**
-眼睛通常位於人體（或臉部）的上方區域。
+* 定義比例單位：
+  ```
+  dot = head_h / 10
+  ```
 
----
+* 估計眼睛中心位置：
+  ```
+  y_eye ≈ y_top + 0.55 * head_h
+  ```
 
-### (3) 在 ROI 中進行眼睛定位
+* 以臉部中心為基準建立 ROI：
+  ```
+  ROI 寬度 ≈ ±3 * dot
+  ROI 高度 ≈ ±1.2 * dot
+  ```
 
-在 ROI 區域內進行更精細的分析以找出眼睛。
+**目的：**
+將搜尋範圍限制在「雙眼區域」，降低干擾（背景、身體、頭髮）。
+<img width="1136" height="719" alt="image" src="https://github.com/user-attachments/assets/cdc3668f-37ea-4b30-be2d-6f5bf6c279f0" />
 
-**步驟：**
-
-`還沒有步驟` 參考Issue#2,#3
-
----
-
-##  實驗結果
-
-最終結果會在原始影像上標示出眼睛位置：
-
-* 成功擷取 ROI 區域
-<img width="1742" height="1019" alt="image" src="https://github.com/user-attachments/assets/63ff6b97-4de8-4230-86fe-8b0f49eee3c3" />
-
-* 在不使用學習模型的情況下完成眼睛定位
-* 以圓形或矩形標記眼睛位置 `還沒做到`
 
 ---
 
-##  優點
+### (3) 在 ROI 中偵測眼珠中心（核心步驟）
 
-*  不需要訓練資料
-*  計算速度快
-*  流程透明、易於理解
-*  易於修改與除錯
+在 ROI 中找出左右兩個「最暗區域群」的中心，視為眼珠位置。
 
 ---
 
-##  限制
+#### Step 1：ROI 前處理
 
-*  對光線變化敏感
-*  在複雜背景下效果較差
-*  假設人體姿態較為標準
-*  遮擋或角度過大時容易失敗
+* 轉灰階
+* 使用 Gaussian Blur 去除雜訊
+* 二值化（反轉，讓暗區變白）
+* 做Close使區域更完整
+<img width="263" height="103" alt="image" src="https://github.com/user-attachments/assets/4daf1783-47cb-4f9d-8f37-94c26374a8fb" />
+<img width="262" height="103" alt="image" src="https://github.com/user-attachments/assets/4dad55b2-b209-459a-9833-5e977d831cbb" />
+<img width="263" height="103" alt="image" src="https://github.com/user-attachments/assets/cbd7f067-396d-437f-9d20-0b2060e368ef" />
+
+---
+#### Step 2：左右分群計算群心（Centroid）
+
+* 使用：
+  ```
+  cv2.connectedComponentsWithStats()
+  ```
+
+* 每個白色區塊代表一個「候選暗區」
+
+取得資訊：
+
+* 面積（area）
+* 外接框（bounding box）
+* 群心（centroid）
+
+
+*  每一群使用：
+
+```
+(cx, cy) = centroid
+```
+
+作為該眼睛的位置。
+<img width="263" height="103" alt="image" src="https://github.com/user-attachments/assets/bba3543a-7357-41e7-8c8b-e786b6d281e3" />
+
 
 ---
 
-##  結論
+## 實驗結果
 
-`還沒有結論`
+最終結果會在原始影像上標示：
+
+* ROI 區域（藍框）
+* 左右眼瞳孔位置（紅點）
+
+<img width="1934" height="1069" alt="image" src="https://github.com/user-attachments/assets/d07309cd-ed56-4d64-b64c-cdc4a7a09bc2" />
 
 ---
+
+## 優點
+
+* 不需要訓練資料
+* 計算速度快（適合即時系統）
+* 流程透明、可解釋性高
+* 易於調整與除錯
+
+---
+
+## 限制
+
+* 對光線變化敏感（threshold 固定）
+* 二值化效果會影響結果
+* 群心可能因雜訊偏移
+* 無法處理：
+  * 側臉
+  * 遮擋（瀏海 / 手）
+  * 強烈陰影
+
+---
+
+## 結論
+
+本方法展示了一種**完全不依賴學習模型**的眼睛定位方式，透過幾何分析與影像處理技術即可達成基本的眼睛偵測。
+
+雖然在複雜環境下仍有限制，但其**輕量性與可解釋性**使其在嵌入式系統或教學應用中具有實用價值。
